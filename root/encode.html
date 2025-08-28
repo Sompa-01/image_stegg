@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Encode | Image Steganography</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#f5f5f7;margin:0;color:#222}
+    header,footer{background:#1f1f1f;color:#fff;text-align:center;padding:16px}
+    main{max-width:900px;margin:24px auto;padding:0 16px}
+    .card{background:#fff;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.06);padding:18px;margin-bottom:18px}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .col{flex:1 1 320px}
+    label{font-weight:600;display:block;margin-bottom:6px}
+    input[type="file"], textarea{width:100%}
+    textarea{min-height:120px;padding:10px;border:1px solid #ddd;border-radius:8px}
+    .btn{display:inline-block;background:#0d6efd;border:none;color:#fff;padding:12px 18px;border-radius:8px;font-weight:600;cursor:pointer}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    img{max-width:100%;border-radius:8px;border:1px solid #eee}
+    .muted{color:#666;font-size:14px}
+    .error{color:#b00020;font-weight:600}
+    .ok{color:#0a7a3d;font-weight:600}
+  </style>
+</head>
+<body>
+<header><h2>🔒 Encode Message into Image</h2></header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div class="col">
+        <label for="imageInput">Select cover image (PNG/JPG)</label>
+        <input type="file" id="imageInput" accept="image/*">
+        <p class="muted">Tip: Badi image ⇒ zyada message store ho sakta hai.</p>
+        <div id="capacityInfo" class="muted"></div>
+      </div>
+      <div class="col">
+        <label for="message">Secret message</label>
+        <textarea id="message" placeholder="Type your secret message here..."></textarea>
+        <div class="muted">Length: <span id="msgLen">0</span> bytes</div>
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center">
+      <button id="encodeBtn" class="btn" disabled>Encode & Download PNG</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Preview</h3>
+    <div class="row">
+      <div class="col">
+        <p class="muted">Original</p>
+        <img id="previewOriginal" alt="" />
+      </div>
+      <div class="col">
+        <p class="muted">Encoded</p>
+        <img id="previewEncoded" alt="" />
+      </div>
+    </div>
+  </div>
+
+  <canvas id="canvas" style="display:none;"></canvas>
+</main>
+<footer>Made with ❤️ by Sompa-Bhui</footer>
+
+<script>
+const imgInput = document.getElementById('imageInput');
+const msgInput = document.getElementById('message');
+const encodeBtn = document.getElementById('encodeBtn');
+const statusEl = document.getElementById('status');
+const capEl = document.getElementById('capacityInfo');
+const msgLenEl = document.getElementById('msgLen');
+const prevOrig = document.getElementById('previewOriginal');
+const prevEnc  = document.getElementById('previewEncoded');
+const canvas   = document.getElementById('canvas');
+const ctx      = canvas.getContext('2d');
+const te = new TextEncoder();
+
+let imgData, capacityBits = 0;
+
+function calcCapacity(w, h){
+  // 3 usable channels (R,G,B) per pixel, 1 bit each
+  return w * h * 3; // bits
+}
+
+imgInput.addEventListener('change', () => {
+  statusEl.textContent = '';
+  const file = imgInput.files?.[0];
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img, 0, 0);
+    imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    capacityBits = calcCapacity(canvas.width, canvas.height);
+    const capBytes = Math.floor((capacityBits - 32) / 8); // minus 32-bit length header
+    prevOrig.src = url;
+    capEl.innerHTML = `Image size: <b>${img.width}×${img.height}</b> — Capacity ≈ <b>${capBytes.toLocaleString()} bytes</b>`;
+    updateButton();
+  };
+  img.src = url;
+});
+
+msgInput.addEventListener('input', () => {
+  const bytes = te.encode(msgInput.value);
+  msgLenEl.textContent = bytes.length;
+  updateButton();
+});
+
+function updateButton(){
+  const bytes = te.encode(msgInput.value);
+  const neededBits = 32 + bytes.length * 8;
+  if(!imgData){
+    encodeBtn.disabled = true;
+    statusEl.textContent = 'Select an image to begin.';
+    return;
+  }
+  if(neededBits > capacityBits){
+    encodeBtn.disabled = true;
+    statusEl.innerHTML = `<span class="error">Message too long for this image.</span>`;
+    return;
+  }
+  encodeBtn.disabled = false;
+  statusEl.innerHTML = `<span class="ok">Ready to encode.</span>`;
+}
+
+encodeBtn.addEventListener('click', () => {
+  if(!imgData) return;
+  const data = new Uint8ClampedArray(imgData.data); // copy
+  const messageBytes = te.encode(msgInput.value);
+  const totalBits = 32 + messageBytes.length * 8;
+
+  // write 32-bit length header (big-endian)
+  let bitIndex = 0;
+  const writeBit = (bit) => {
+    // data array layout: [R,G,BA, R,G,BA, ...] (A at every 4th byte)
+    const channelIndex = Math.floor(bitIndex / 3); // index of pixel/channel among RGBs
+    const channelPos = bitIndex % 3; // 0-R,1-G,2-B
+    const dataIndex = channelIndex * 4 + channelPos; // skip alpha
+    data[dataIndex] = (data[dataIndex] & 0xFE) | (bit & 1);
+    bitIndex++;
+  };
+
+  const length = messageBytes.length >>> 0;
+  for(let i=31; i>=0; i--) writeBit((length >> i) & 1);
+
+  for(const byte of messageBytes){
+    for(let i=7;i>=0;i--) writeBit((byte >> i) & 1);
+  }
+
+  // put back to canvas
+  const out = new ImageData(data, imgData.width, imgData.height);
+  ctx.putImageData(out, 0, 0);
+
+  // preview + download
+  const outURL = canvas.toDataURL('image/png');
+  prevEnc.src = outURL;
+
+  const a = document.createElement('a');
+  a.href = outURL;
+  a.download = 'stego_image.png';
+  a.click();
+  statusEl.innerHTML = `<span class="ok">Encoded! PNG downloaded.</span>`;
+});
+</script>
+</body>
+</html>
