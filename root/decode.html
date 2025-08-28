@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Decode | Image Steganography</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:#f5f5f7;margin:0;color:#222}
+    header,footer{background:#1f1f1f;color:#fff;text-align:center;padding:16px}
+    main{max-width:800px;margin:24px auto;padding:0 16px}
+    .card{background:#fff;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.06);padding:18px}
+    label{font-weight:600;display:block;margin-bottom:6px}
+    input[type="file"]{width:100%}
+    .btn{display:inline-block;background:#0d6efd;border:none;color:#fff;padding:12px 18px;border-radius:8px;font-weight:600;cursor:pointer}
+    img{max-width:100%;border-radius:8px;border:1px solid #eee;margin-top:10px}
+    .muted{color:#666}
+    .error{color:#b00020;font-weight:600}
+  </style>
+</head>
+<body>
+<header><h2>🔍 Decode Hidden Message</h2></header>
+<main>
+  <div class="card">
+    <label for="stegoInput">Select stego image (PNG from encoder)</label>
+    <input type="file" id="stegoInput" accept="image/*">
+    <img id="preview" alt="preview"/>
+    <div style="margin-top:14px">
+      <button id="decodeBtn" class="btn" disabled>Decode</button>
+      <span id="status" class="muted"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <h3>Decoded Message</h3>
+    <pre id="output" style="white-space:pre-wrap"></pre>
+  </div>
+
+  <canvas id="canvas" style="display:none;"></canvas>
+</main>
+<footer>Made with ❤️ by Sompa-Bhui</footer>
+
+<script>
+const stegoInput = document.getElementById('stegoInput');
+const decodeBtn  = document.getElementById('decodeBtn');
+const statusEl   = document.getElementById('status');
+const output     = document.getElementById('output');
+const preview    = document.getElementById('preview');
+const canvas     = document.getElementById('canvas');
+const ctx        = canvas.getContext('2d');
+const td = new TextDecoder();
+
+let imgData = null;
+
+stegoInput.addEventListener('change', () => {
+  statusEl.textContent = '';
+  output.textContent = '';
+  const file = stegoInput.files?.[0];
+  if(!file){ decodeBtn.disabled = true; return; }
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    canvas.width = img.width;
+    canvas.height = img.height;
+    ctx.drawImage(img,0,0);
+    imgData = ctx.getImageData(0,0,canvas.width,canvas.height);
+    preview.src = url;
+    decodeBtn.disabled = false;
+    statusEl.textContent = 'Ready to decode.';
+  };
+  img.src = url;
+});
+
+decodeBtn.addEventListener('click', () => {
+  if(!imgData) return;
+
+  const data = imgData.data;
+  let bitIndex = 0;
+
+  const readBit = () => {
+    const channelIndex = Math.floor(bitIndex / 3);
+    const channelPos = bitIndex % 3; // R,G,B
+    const dataIndex = channelIndex * 4 + channelPos;
+    const bit = data[dataIndex] & 1;
+    bitIndex++;
+    return bit;
+  };
+
+  // read 32-bit length
+  let length = 0;
+  for(let i=0;i<32;i++){
+    length = (length << 1) | readBit();
+  }
+
+  // sanity check
+  const maxBytes = Math.floor((imgData.width*imgData.height*3 - 32)/8);
+  if(length < 0 || length > maxBytes){
+    statusEl.innerHTML = '<span class="error">Not a valid stego image or corrupted data.</span>';
+    return;
+  }
+
+  const bytes = new Uint8Array(length);
+  for(let i=0;i<length;i++){
+    let b = 0;
+    for(let j=0;j<8;j++) b = (b << 1) | readBit();
+    bytes[i] = b;
+  }
+
+  const message = td.decode(bytes);
+  output.textContent = message || '(empty message)';
+  statusEl.textContent = 'Decoded.';
+});
+</script>
+</body>
+</html>
